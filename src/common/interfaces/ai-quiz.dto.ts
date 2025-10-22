@@ -18,9 +18,9 @@ export class AnswerDto {
   @IsOptional()
   phaseIndex?: number;
 
-  @IsString()
+  // Allow string or number answer format
   @IsNotEmpty()
-  answer: string;
+  answer: string | number;
 }
 
 // Simplified version for microservice - accepts both formats

@@ -11,6 +11,14 @@ export class EducationalContent {
     default: [],
     index: true
   })
+  videos: { title: string; url: string; description: string; duration: string; tag: string }[];
+  
+  // For backward compatibility
+  @Prop({
+    type: [{ title: String, url: String, description: String, duration: String, tag: String }],
+    default: [],
+    index: true
+  })
   videoUrl: { title: string; url: string; description: string; duration: string; tag: string }[];
 
   @Prop({
@@ -52,12 +60,41 @@ export class EducationalContent {
     skill: string;
     description: string;
   }>;
+  
+  @Prop({
+    type: [
+      {
+        title: String,
+        resourceType: String,
+        description: String,
+        skillLevel: String,
+        estimatedTimeToComplete: String,
+        url: String,
+      },
+    ],
+    default: [],
+    index: true
+  })
+  resources: Array<{
+    title: string;
+    resourceType: string;
+    description: string;
+    skillLevel: string;
+    estimatedTimeToComplete: string;
+    url: string;
+  }>;
 
-  @Prop({ enum: ['video', 'book', 'game'], required: false, index: true })
-  contentType?: 'video' | 'book' | 'game';
+  @Prop({ enum: ['video', 'book', 'game', 'resource'], required: false, index: true })
+  contentType?: 'video' | 'book' | 'game' | 'resource';
 
   @Prop({ type: Types.ObjectId, ref: 'User', index: true })
   user: Types.ObjectId | User;
+  
+  @Prop({ type: String, required: false, index: true })
+  sessionId: string;
+  
+  @Prop({ type: Object, required: false })
+  analysis: Record<string, any>;
 }
 
 export const EducationalContentSchema =

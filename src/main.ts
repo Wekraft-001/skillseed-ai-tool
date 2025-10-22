@@ -9,13 +9,17 @@ async function bootstrap() {
   // Enable CORS for cross-service communication
   app.enableCors({
     origin: [
-      'http://localhost:3000', // Main service
-      'http://localhost:5173', // Frontend dev
-      'http://localhost:3001', // This service
+      'http://localhost:3000',  // Main service UI
+      'http://localhost:5173',  // Frontend dev
+      'http://localhost:5500',  // Main backend service
+      'http://localhost:3001',  // This service
+      'https://skillseed-parent.vercel.app', // Production frontend
       process.env.FRONTEND_URL,
       process.env.MAIN_SERVICE_URL,
     ].filter(Boolean),
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+    allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization'],
   });
 
   // Global validation pipe
@@ -27,6 +31,12 @@ async function bootstrap() {
 
   // API prefix
   app.setGlobalPrefix('api');
+  
+  // Set higher timeout for processing requests
+  app.use((req, res, next) => {
+    res.setTimeout(120000); // 120 seconds timeout
+    next();
+  });
 
   // Swagger documentation
   const config = new DocumentBuilder()
