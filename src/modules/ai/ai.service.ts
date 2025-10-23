@@ -583,33 +583,8 @@ export class AiService {
       // Save the quiz in the AI microservice database
       const savedQuiz = await quiz.save();
       
-      // Sync the quiz with the main backend
-      try {
-        const backendUrl = this.configService.get<string>('BACKEND_URL') || 'http://localhost:3000';
-        const syncEndpoint = `${backendUrl}/api/internal/ai/quiz/sync`;
-        
-        this.logger.log(`Syncing quiz with main backend at ${syncEndpoint}`);
-        
-        // Convert the Mongoose document to a plain object
-        const quizData = savedQuiz.toObject();
-        
-        // Send the quiz data to the main backend
-        await this.httpService.axiosRef.post(
-          syncEndpoint, 
-          quizData,
-          {
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${this.configService.get<string>('INTERNAL_API_KEY')}`
-            }
-          }
-        );
-        
-        this.logger.log(`Successfully synced quiz ${savedQuiz._id} with main backend`);
-      } catch (syncError) {
-        this.logger.error(`Failed to sync quiz with main backend: ${syncError.message}`, syncError.stack);
-        // Don't throw error here, as we want to return the saved quiz even if sync fails
-      }
+      // Note: Removed sync logic for clean microservice architecture
+      // Main backend will fetch data via AI Gateway when needed
       
       return savedQuiz;
     } catch (error) {
@@ -782,42 +757,8 @@ export class AiService {
         if (savedQuiz) {
           this.logger.log(`Verified saved quiz: submitted=${savedQuiz.submitted}, completed=${savedQuiz.completed}, hasAnalysis=${!!savedQuiz.analysis}`);
           
-          // Also send the quiz to the backend to be saved there too
-          if (token) {
-            try {
-              // Convert to plain object for transmission
-              const quizToSync: any = savedQuiz.toObject();
-              // Ensure ObjectId is converted to string
-              quizToSync._id = quizToSync._id.toString();
-              if (quizToSync.user) {
-                quizToSync.user = quizToSync.user.toString();
-              }
-              
-              this.logger.log(`Syncing quiz ${quizToSync._id} to backend database`);
-              
-              // Send to backend internal endpoint
-              await firstValueFrom(
-                this.httpService.post(
-                  `${this.mainServiceUrl}/api/internal/ai/quiz/sync`,
-                  quizToSync,
-                  { 
-                    headers: { 
-                      Authorization: token ? `Bearer ${token}` : '',
-                      'Content-Type': 'application/json',
-                    },
-                    timeout: 10000 
-                  }
-                )
-              );
-              
-              this.logger.log(`Successfully synced quiz ${quizToSync._id} to backend database`);
-            } catch (syncError) {
-              // Don't fail the whole operation if sync fails
-              this.logger.error(`Failed to sync quiz to backend: ${syncError.message}`, syncError.stack);
-            }
-          } else {
-            this.logger.warn(`No token available, skipping backend quiz sync for quiz ${savedQuiz._id}`);
-          }
+          // Note: Removed sync logic for clean microservice architecture
+          // Main backend will fetch data via AI Gateway when needed
         } else {
           this.logger.warn(`Could not verify saved quiz - not found after save!`);
         }
