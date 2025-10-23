@@ -12,9 +12,24 @@ import { AiModule } from './modules/ai/ai.module';
       envFilePath: '.env',
     }),
     MongooseModule.forRootAsync({
-      useFactory: () => ({
-        uri: process.env.MONGODB_URI || 'mongodb://localhost:27017/skillseed-ai',
-      }),
+      useFactory: () => {
+        const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017/skillseed-ai';
+        console.log(`Connecting to MongoDB at: ${uri.split('@')[0].replace(/:([^:]+)@/, ':****@')}`);
+        return {
+          uri,
+          useNewUrlParser: true,
+          useUnifiedTopology: true,
+          connectionFactory: (connection) => {
+            connection.on('connected', () => {
+              console.log('MongoDB connection established successfully');
+            });
+            connection.on('error', (error) => {
+              console.error('MongoDB connection error:', error);
+            });
+            return connection;
+          }
+        };
+      },
     }),
     AiModule,
   ],
