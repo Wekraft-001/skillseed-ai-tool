@@ -55,7 +55,18 @@ export class CareerQuiz extends Document {
   @Prop({ default: false, index: true })
   submitted: boolean;
 
-  @Prop({ type: [Number], default: [] })
+  @Prop({
+    type: [{
+      type: Number,
+      validate: {
+        validator: function(v) {
+          return !isNaN(Number(v));
+        },
+        message: props => `${props.value} is not a valid number!`
+      }
+    }],
+    default: []
+  })
   answers: number[];
 
   @Prop({ type: Date })

@@ -152,6 +152,22 @@ export class YouTubeService {
    * Get age-appropriate search terms
    */
   private getAgeTerms(ageRange: string): string {
+    // Try to extract age from range pattern like "6-8"
+    const match = ageRange.match(/(\d+)-(\d+)/);
+    if (match) {
+      const minAge = parseInt(match[1]);
+      const maxAge = parseInt(match[2]);
+      
+      // Use average age for determining age group
+      const avgAge = Math.floor((minAge + maxAge) / 2);
+      
+      if (avgAge <= 6) return 'preschool toddler early learning';
+      if (avgAge <= 10) return 'kids elementary primary';
+      if (avgAge <= 14) return 'middle school junior';
+      return 'high school secondary';
+    }
+    
+    // Fallback to number-only parsing
     const age = parseInt(ageRange) || 8;
     
     if (age <= 6) return 'preschool toddler early learning';
