@@ -233,6 +233,26 @@ export class AiService {
     }
   }
 
+  // Award quiz completion stars via the proper rewards endpoint
+  async awardQuizCompletionStars(userId: string, quizId: string, token: string): Promise<void> {
+    try {
+      this.logger.log(`Awarding quiz completion stars for user ${userId}, quiz ${quizId}`);
+      
+      await firstValueFrom(
+        this.httpService.post(
+          `${this.mainServiceUrl}/api/student/rewards/complete-quiz/${quizId}`,
+          {}, // Empty body as user comes from JWT token
+          { headers: { Authorization: `Bearer ${token}` } }
+        )
+      );
+      
+      this.logger.log(`Successfully awarded quiz completion stars for user ${userId}`);
+    } catch (error) {
+      this.logger.error(`Failed to award quiz completion stars for user ${userId}`, error.message);
+      // Don't throw here, rewards update is not critical for AI functionality
+    }
+  }
+
   // Generate quiz for authenticated user
   async generateCareerQuizForUserId(userId: string, userAgeRange: string, token: string) {
     this.logger.log(`Generating quiz for user ${userId} with age range ${userAgeRange}`);
@@ -786,9 +806,9 @@ export class AiService {
 
       await contentDoc.save();
 
-      // Update rewards if user is authenticated
+      // Award quiz completion stars if user is authenticated
       if (userId && token) {
-        await this.updateRewards(userId, 50, token); // 50 points for completing quiz
+        await this.awardQuizCompletionStars(userId, quiz._id.toString(), token);
       }
 
       return {
