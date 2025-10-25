@@ -13,6 +13,7 @@ import { Model, Types } from 'mongoose';
 import { LoggerService } from 'src/common/logger/logger.service';
 import { CareerQuiz, CareerQuizDocument } from '../schemas/career-quiz.schema';
 import { YouTubeService, YouTubeVideoResult } from './youtube.service';
+import { SubmitAnswersDto } from 'src/common/interfaces/ai-quiz.dto';
 import {
   EducationalContent,
   EducationalContentDocument,
@@ -20,7 +21,6 @@ import {
   UserDocument,
 } from '../schemas';
 import { UserRole } from 'src/common/interfaces';
-import { SubmitAnswersDto } from 'src/common/interfaces/ai-quiz.dto';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import * as fs from 'fs';
@@ -229,6 +229,26 @@ export class AiService {
       );
     } catch (error) {
       this.logger.error('Failed to update rewards in main service', error.message);
+      // Don't throw here, rewards update is not critical for AI functionality
+    }
+  }
+
+  // Award quiz completion stars via the proper rewards endpoint
+  async awardQuizCompletionStars(userId: string, quizId: string, token: string): Promise<void> {
+    try {
+      this.logger.log(`Awarding quiz completion stars for user ${userId}, quiz ${quizId}`);
+      
+      await firstValueFrom(
+        this.httpService.post(
+          `${this.mainServiceUrl}/api/student/rewards/complete-quiz/${quizId}`,
+          {}, // Empty body as user comes from JWT token
+          { headers: { Authorization: `Bearer ${token}` } }
+        )
+      );
+      
+      this.logger.log(`Successfully awarded quiz completion stars for user ${userId}`);
+    } catch (error) {
+      this.logger.error(`Failed to award quiz completion stars for user ${userId}`, error.message);
       // Don't throw here, rewards update is not critical for AI functionality
     }
   }
@@ -590,231 +610,6 @@ export class AiService {
     } catch (error) {
       this.logger.error('Error generating career quiz', error.stack);
       throw new BadRequestException('Failed to generate career quiz');
-    }
-  }
-
-  async submitQuizAnswers(submitAnswersDto: SubmitAnswersDto, token?: string): Promise<any> {
-    const { quizId, answers, userId } = submitAnswersDto;
-
-    try {
-      this.logger.log(`Processing quiz submission for quizId: ${quizId}`);
-      this.logger.debug(`Received answers: ${JSON.stringify(answers)}`);
-
-      // Find the quiz - handle potential truncated ObjectIds
-      let quiz;
-      try {
-        // First try with the provided ID
-        quiz = await this.quizModel.findById(quizId);
-      } catch (idError) {
-        this.logger.warn(`Error finding quiz with ID: ${quizId}. Error: ${idError.message}`);
-        this.logger.log('Attempting to find quiz with regex search on _id');
-        
-        // If that fails, try a regex search on the _id field to handle truncated IDs
-        try {
-          // Use a regex to find IDs that start with the provided quizId
-          const possibleQuizzes = await this.quizModel.find({
-            _id: { $regex: new RegExp(`^${quizId}`) }
-          });
-          
-          if (possibleQuizzes.length === 1) {
-            quiz = possibleQuizzes[0];
-            this.logger.log(`Found quiz with similar ID: ${quiz._id}`);
-          } else if (possibleQuizzes.length > 1) {
-            this.logger.warn(`Found multiple quizzes with similar ID. Using most recent one.`);
-            // Sort by creation date descending and take the first one
-            quiz = possibleQuizzes.sort((a, b) => {
-              const dateA = a.get('createdAt') || new Date(0);
-              const dateB = b.get('createdAt') || new Date(0);
-              return dateB.getTime() - dateA.getTime();
-            })[0];
-          }
-        } catch (regexError) {
-          this.logger.error(`Regex search failed: ${regexError.message}`);
-        }
-      }
-      
-      if (!quiz) {
-        throw new NotFoundException(`Quiz not found with ID: ${quizId}`);
-      }
-
-      // Validate ownership if userId provided
-      if (userId && quiz.user?.toString() !== userId) {
-        this.logger.warn(`Quiz ownership validation failed: quiz.user=${quiz.user}, userId=${userId}`);
-        throw new ForbiddenException('Quiz does not belong to this user');
-      }
-
-      // Mark quiz as submitted and store answers
-      quiz.submitted = true;
-      quiz.completed = true; // Also set completed flag for backward compatibility
-      
-      this.logger.log(`Marking quiz ${quiz._id} as submitted=true and completed=true`);
-      // Add timestamp for when the quiz was submitted
-      quiz.submittedAt = new Date();
-      
-      try {
-        // Convert answers to numbers - the MongoDB schema expects an array of numbers
-        const processedAnswers: number[] = [];
-        
-        if (Array.isArray(answers)) {
-          this.logger.debug(`Processing answers array with length: ${answers.length}`);
-          
-          if (answers.length > 0) {
-            if (typeof answers[0] === 'object') {
-              // Handle array of objects with emoji/text answers
-              for (let i = 0; i < answers.length; i++) {
-                const answer = answers[i];
-                let numericValue = 0;
-                
-                if (answer && typeof answer === 'object') {
-                  const answerValue = answer.answer;
-                  if (typeof answerValue === 'string') {
-                    // Convert emoji-based answers to numeric values
-                    if (answerValue.includes('🤩') || answerValue.includes('A lot')) {
-                      numericValue = 3;
-                    } else if (answerValue.includes('😀') || answerValue.includes('Often')) {
-                      numericValue = 2;
-                    } else if (answerValue.includes('🙂') || answerValue.includes('Sometimes')) {
-                      numericValue = 1;
-                    } else if (answerValue.includes('😐') || answerValue.includes('Not much')) {
-                      numericValue = 0;
-                    } else {
-                      // Try to parse as number
-                      const parsed = parseInt(answerValue);
-                      numericValue = isNaN(parsed) ? 0 : parsed;
-                    }
-                  } else if (typeof answerValue === 'number') {
-                    numericValue = answerValue;
-                  }
-                } else if (typeof answer === 'number') {
-                  numericValue = answer;
-                }
-                
-                processedAnswers.push(numericValue);
-              }
-            } else if (typeof answers[0] === 'number') {
-              // Direct number array
-              for (const answer of answers) {
-                if (typeof answer === 'number') {
-                  processedAnswers.push(answer);
-                } else {
-                  processedAnswers.push(0); // Default for non-numbers
-                }
-              }
-            } else if (typeof answers[0] === 'string') {
-              // Array of string answers
-              for (const answer of answers) {
-                let numericValue = 0;
-                if (typeof answer === 'string') {
-                  const answerString = String(answer); // Ensure it's a string
-                  if (answerString.includes('🤩') || answerString.includes('A lot')) {
-                    numericValue = 3;
-                  } else if (answerString.includes('😀') || answerString.includes('Often')) {
-                    numericValue = 2;
-                  } else if (answerString.includes('🙂') || answerString.includes('Sometimes')) {
-                    numericValue = 1;
-                  } else if (answerString.includes('😐') || answerString.includes('Not much')) {
-                    numericValue = 0;
-                  } else {
-                    const parsed = parseInt(answerString);
-                    numericValue = isNaN(parsed) ? 0 : parsed;
-                  }
-                }
-                processedAnswers.push(numericValue);
-              }
-            }
-          }
-        }
-        
-        this.logger.debug(`Processed answers: ${JSON.stringify(processedAnswers)}`);
-        
-        // Assign the numeric answers to the quiz
-        quiz.answers = processedAnswers;
-        quiz.submittedAt = new Date();
-      } catch (error) {
-        this.logger.error(`Error processing answers: ${error.message}`);
-        throw new BadRequestException(`Failed to process quiz answers: ${error.message}`);
-      }
-      
-      // Analyze the quiz before saving it
-      const analysis = await this.analyzeQuizAnswers(quiz);
-      
-      // Store the analysis in the quiz document so we can find it later
-      quiz.analysis = analysis;
-      
-      // Extract career areas from analysis and store in quiz document
-      if (analysis && analysis.topCareerAreas && Array.isArray(analysis.topCareerAreas)) {
-        quiz.careerAreas = analysis.topCareerAreas;
-      }
-      
-      // Now save the quiz with the analysis included
-      this.logger.log(`Saving quiz ${quiz._id} with submitted=true, completed=true and analysis data`);
-      try {
-        await quiz.save();
-        this.logger.log(`Successfully saved quiz ${quiz._id} with analysis`);
-        
-        // Verify the quiz was saved correctly
-        const savedQuiz = await this.quizModel.findById(quiz._id);
-        if (savedQuiz) {
-          this.logger.log(`Verified saved quiz: submitted=${savedQuiz.submitted}, completed=${savedQuiz.completed}, hasAnalysis=${!!savedQuiz.analysis}`);
-          
-          // Note: Removed sync logic for clean microservice architecture
-          // Main backend will fetch data via AI Gateway when needed
-        } else {
-          this.logger.warn(`Could not verify saved quiz - not found after save!`);
-        }
-      } catch (saveError) {
-        this.logger.error(`Error saving quiz with analysis: ${saveError.message}`, saveError.stack);
-        throw new BadRequestException(`Failed to save quiz with analysis: ${saveError.message}`);
-      }
-      
-      this.logger.log(`Quiz ${quiz._id} marked as submitted and analysis saved`);
-      
-      // Get educational content
-      const educationalContent = await this.getVerifiedEducationalContent(analysis);
-
-      // Create educational content record
-      const contentDoc = new this.eduContentModel({
-        user: quiz.user,
-        sessionId: quiz.sessionId,
-        analysis,
-        videos: educationalContent.videos,
-        games: educationalContent.games,
-        books: educationalContent.books,
-        resources: educationalContent.resources,
-        createdAt: new Date(),
-      });
-
-      await contentDoc.save();
-
-      // Update rewards if user is authenticated
-      if (userId && token) {
-        await this.updateRewards(userId, 50, token); // 50 points for completing quiz
-      }
-
-      return {
-        analysis,
-        educationalContent,
-        message: 'Quiz submitted and analyzed successfully',
-      };
-    } catch (error) {
-      this.logger.error(`Error submitting quiz answers - ${error.message}`, error.stack);
-      
-      // Handle specific errors
-      if (error.name === 'ValidationError') {
-        this.logger.error(`Validation error in quiz answers: ${error.message}`);
-        throw new BadRequestException(`Invalid quiz answer format: ${error.message}`);
-      }
-      
-      if (error.name === 'CastError') {
-        this.logger.error(`Cast error in quiz answers: ${error.message}`);
-        throw new BadRequestException(`Invalid data type in quiz answers: ${error.message}`);
-      }
-      
-      if (error instanceof NotFoundException || error instanceof ForbiddenException) {
-        throw error;
-      }
-      
-      throw new InternalServerErrorException(`Failed to process quiz submission: ${error.message}`);
     }
   }
 
@@ -2015,6 +1810,123 @@ export class AiService {
     
     // Default emoji if no match found
     return '🌟';
+  }
+
+  // Submit quiz answers and generate analysis
+  async submitQuizAnswers(submitDto: SubmitAnswersDto, token?: string): Promise<any> {
+    try {
+      this.logger.log(`Submitting quiz ${submitDto.quizId} with ${submitDto.answers.length} answers`);
+      
+      // Find the quiz
+      const quiz = await this.quizModel.findById(submitDto.quizId);
+      if (!quiz) {
+        throw new NotFoundException(`Quiz with ID ${submitDto.quizId} not found`);
+      }
+      
+      // Get user details if token is provided
+      let userDetails = null;
+      if (token && submitDto.userId) {
+        try {
+          userDetails = await this.getUserFromMainService(submitDto.userId, token);
+        } catch (error) {
+          this.logger.warn(`Could not fetch user details: ${error.message}`);
+        }
+      }
+      
+      // Process and save answers
+      const processedAnswers: number[] = [];
+      if (Array.isArray(submitDto.answers)) {
+        if (submitDto.answers.length > 0) {
+          if (typeof submitDto.answers[0] === 'object') {
+            // Handle AnswerDto[] format
+            for (const answer of submitDto.answers) {
+              if (typeof answer === 'object' && 'answer' in answer) {
+                const answerValue = answer.answer;
+                if (typeof answerValue === 'number') {
+                  processedAnswers.push(answerValue);
+                } else if (typeof answerValue === 'string') {
+                  const parsed = parseInt(answerValue);
+                  processedAnswers.push(isNaN(parsed) ? 0 : parsed);
+                } else {
+                  processedAnswers.push(0);
+                }
+              } else {
+                processedAnswers.push(0);
+              }
+            }
+          } else {
+            // Handle number[] format
+            for (const answer of submitDto.answers) {
+              if (typeof answer === 'number') {
+                processedAnswers.push(answer);
+              } else {
+                processedAnswers.push(0);
+              }
+            }
+          }
+        }
+      }
+      
+      quiz.answers = processedAnswers;
+      quiz.submitted = true;
+      quiz.completed = true;
+      quiz.submittedAt = new Date();
+      
+      // Generate analysis
+      const analysis = await this.analyzeQuizAnswers(quiz);
+      quiz.analysis = analysis;
+      
+      // Save the quiz
+      await quiz.save();
+      this.logger.log(`Quiz ${quiz._id} submitted and analyzed successfully`);
+      
+      // Award stars for quiz completion (if user is authenticated)
+      if (token && submitDto.userId) {
+        try {
+          await this.awardQuizCompletionStars(submitDto.userId, submitDto.quizId, token);
+        } catch (rewardError) {
+          this.logger.error(`Failed to award quiz completion stars for user ${submitDto.userId}`, rewardError.message);
+        }
+      }
+      
+      // Generate educational content based on analysis
+      const educationalContent = await this.getVerifiedEducationalContent(analysis);
+      
+      // Prepare quiz details for response
+      const quizDetails = {
+        id: quiz._id.toString(),
+        questions: quiz.questions.length,
+        submittedAt: quiz.submittedAt,
+        ageRange: quiz.ageRange,
+        createdAt: quiz.get('createdAt') || quiz.submittedAt || new Date()
+      };
+      
+      // Prepare user details for response (only include safe fields)
+      const safeUserDetails = userDetails ? {
+        id: userDetails._id || submitDto.userId,
+        firstName: userDetails.firstName,
+        lastName: userDetails.lastName,
+        age: userDetails.age,
+        role: userDetails.role
+      } : {
+        id: submitDto.userId || submitDto.sessionId,
+        type: submitDto.sessionId ? 'guest' : 'authenticated'
+      };
+      
+      return {
+        analysis,
+        educationalContent,
+        userDetails: safeUserDetails,
+        quizDetails,
+        message: 'Quiz submitted and analyzed successfully'
+      };
+    } catch (error) {
+      this.logger.error(`Error submitting quiz answers: ${error.message}`, error.stack);
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new BadRequestException(`Failed to submit quiz: ${error.message}`);
+    }
   }
 
   // Test endpoint for YouTube integration
