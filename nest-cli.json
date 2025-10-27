@@ -5,10 +5,7 @@
   "compilerOptions": {
     "deleteOutDir": true,
     "assets": [
-      {
-        "include": "modules/ai/quiz-data/**/*",
-        "outDir": "dist/modules/ai/quiz-data"
-      }
+      { "include": "**/*.json", "watchAssets": true }
     ],
     "watchAssets": true
   }
